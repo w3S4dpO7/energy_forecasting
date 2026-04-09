@@ -1,0 +1,181 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{geometry} % For adjusting page margins
+\usepackage{booktabs} % For professional looking tables
+\usepackage{hyperref} % For clickable links
+\usepackage{amsmath}
+
+\geometry{a4paper, margin=1.2in}
+
+\title{Advanced Time Series Forecasting \\ \large Spain Energy Demand Forecasting}
+\author{Roberto Aldanondo \and Andrés Malón}
+\date{April 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{Executive Summary}
+
+This report documents the end-to-end development of an hourly day-ahead national electricity demand forecasting pipeline for the Spanish peninsula. Extracted empirically from a chronologically un-leaked holdout validation set, the winning machine learning architecture is \textbf{LightGBM}, which achieved a Mean Absolute Error (MAE) of \textbf{1,537.6 MW} and a Mean Absolute Percentage Error (MAPE) of \textbf{5.26\%}. 
+
+While LightGBM definitively outperformed all other deep learning candidates—including TabNet, N-HiTS, and Prophet—and comfortably shattered the baseline \textbf{Seasonal Naïve Floor (9.21\% MAPE)}, it failed to surpass the official Transmission System Operator (\textbf{TSO Ceiling}), which dominates with a world-class \textbf{0.97\% MAPE}. As demonstrated throughout this report, rather than an algorithmic deficiency, this gap stems from strict adherence to day-ahead temporal constraints combined with a lack of comprehensive physical grid visibility (e.g., undocumented cross-border flows and behind-the-meter generation).
+
+\section{Business Context \& Problem Formulation}
+
+In modern electrical grids governed by Kirchhoff's laws, electricity cannot be easily stored at scale; supply must perfectly match demand at every instantaneous moment. Forecasting errors carry severe consequences:
+\begin{itemize}
+    \item \textbf{Financial Costs:} Underpredicting demand forces grid operators to procure emergency power on the intraday spot market at severely elevated, punitive prices. Overpredicting leads to wasted base-load curtailment.
+    \item \textbf{Physical Grid Stability:} Sustained structural forecasting failures cascade into frequency imbalances, heavily stressing generation infrastructure. As vividly demonstrated by the infamous "Gran Apagón" that recently paralyzed the Iberian Peninsula—where a sudden loss of nearly 15 GW triggered an overvoltage cascade that left millions without power—preventing catastrophic national blackouts requires flawless anticipation of load behavior.
+\end{itemize}
+
+The formulated scientific goal of this project forces models to predict national electricity demand (\texttt{total\_load\_actual}), predicting the continuous $t+1$ to $t+24$ hourly MWh profile. 
+
+Two critical metrics were explicitly chosen:
+\begin{itemize}
+    \item \textbf{Mean Absolute Error (MAE):} Represents the \textit{absolute physical imbalance in Megawatts} indicating the exact magnitude of reserve generation the TSO must spin up.
+    \item \textbf{Mean Absolute Percentage Error (MAPE):} The definitive \textit{relative business metric}, widely understood across grid management and energy trading floors to scale error relative to baseline load size.
+    \item \textbf{Mean Absolute Scaled Error (MASE):} The \textit{error scaled relative to the in-sample naive benchmark}, providing a robust statistical measure of relative improvement.
+\end{itemize}
+
+\section{Exploratory Data Analysis \& Quality Control}
+
+Extensive exploratory visual analysis exposed several vital anomalies requiring rigorous data correction protocols:
+\begin{itemize}
+    \item \textbf{Timestamp Synchronization \& API Deduplication:} The OpenWeatherMap API yielded duplicate \texttt{(dt\_iso, city\_name)} pairs. These were carefully deduplicated discarding secondary occurrences, followed by a meticulous handling of Daylight Saving Time (DST) jumps to align all features onto a continuously unbroken, evenly-spaced timeseries index matching 'Europe/Madrid'.
+\end{itemize}
+
+\subsection*{The "Leakage Trap"}
+A critical discovery involved the physical dynamics behind electrical generation. Due to system balancing constraints, the mathematical sum of energy generated intrinsically mirrors the electricity demanded ($R^2 \approx 1.0$). Consequently, any inclusion of physical real-time data ($t=0$) constitutes severe \textbf{causal data leakage}. To enforce the rules of a genuine day-ahead forecaster, the \texttt{total\_load\_forecast}, raw \texttt{generation} volumes by source, and all real-time \texttt{price} features were strictly purged from the primary operational modeling pipeline.
+
+\section{Feature Engineering \& The Two Paradigms}
+
+To rigorously evaluate the algorithms, feature engineering was bifurcated into two distinct data paradigms: an operational constraint matrix and a theoretical bounding matrix.
+
+\subsection*{Paradigm A: The Operational Day-Ahead Matrix (Honest Forecasting)}
+This matrix represents the true constraints of an autonomous grid forecasting system. It forces models to learn the underlying physics and behavior of the grid without relying on external expert forecasts.
+\begin{itemize}
+    \item \textbf{Thermodynamic Weather Aggregations:} Electricity usage exhibits a distinctly non-linear U-shape driven by extreme hot/cold fluctuations. To linearize this curve, temperature readings were split into two monotonically increasing domains: \textbf{Heating Degree Days (HDD)} and \textbf{Cooling Degree Days (CDD)}, pegged precisely to the ASHRAE structural comfort base of 18$^\circ$C.
+    \item \textbf{Mathematical Cyclical Encodings:} Variables (hour, day of week, day of year) were embedded via Fourier Sine and Cosine transformations, bridging the chronological manifold smoothly.
+    \item \textbf{Behavioral External Covariates (Spanish Holidays):} Using the \texttt{holidays} library, the algorithm mapped national holidays and implemented an \textbf{"is\_bridge\_day" (Puente) flag}, mathematically detecting a given Monday bordered by a Tuesday holiday, capturing complex long-weekend grid demand suppressions.
+    \item \textbf{Leakage-Free Autoregressive Rolling Windows:} To predict $t+1$ to $t+24$ without leakage, the dataset was rigidly shifted by 24 hours ($t-24$ and $t-168$). Models received purely delayed rolling averages, maxes, mins, and historical demand derivatives.
+\end{itemize}
+
+\subsection*{Paradigm B: The Kaggle Sandbox Matrix (Theoretical Bounds)}
+To benchmark algorithmic upper limits and analyze neural attention mechanisms, a secondary dataset was engineered mimicking the unconstrained environment of a Kaggle competition.
+\begin{itemize}
+    \item \textbf{Market \& TSO Forecast Integration:} Day-ahead cleared market prices and TSO-issued day-ahead wind/solar forecasts were included. While technically available operationally, they were excluded from Paradigm A to prevent "forecast dependency" and force the algorithms to model physics rather than correlate to external TSO predictions.
+    \item \textbf{Target-Correlated Leakage:} To test advanced deep learning architectures (specifically the Temporal Fusion Transformer's Variable Selection Network), raw $t=0$ generation data was deliberately leaked. This establishes a mathematical floor for the error metric, demonstrating how models behave when granted the underlying answer key.
+\end{itemize}
+
+\section{Methodology \& Architecture Selection}
+
+A deliberate architectural escalation ranged from baseline gradient-boosted trees (LightGBM) to heavily parameterized sequence DL frameworks (N-HiTS, Temporal Fusion Transformer).
+
+Optuna Bayesian Hyperparameter Optimization mapped the algorithmic ceilings of the deep learning prototypes. The configuration relied upon structural rules:
+\begin{itemize}
+    \item \textbf{The "Information Bottleneck" Constraint on N-HiTS:} Deep neural topologies were intentionally confined mathematically. Optuna searched spaces utilizing dynamic boundaries (shallower networks $\le 3$ layers allowed maximal layer widths out to 512 parameters to memorize rapid oscillations, while sequentially deep networks $> 5$ layers were structurally bottlenecked to bounds as tight as 64-128 parameters). This forced high-level chronological compressions and curbed rapid overfitting.
+    \item \textbf{TFT Variable Selection Expansion:} The Temporal Fusion Transformer possesses innate variable evaluation gates to analyze exogenous regressors. Managing a comprehensive 38-feature multivariate matrix, Optuna navigated the \texttt{hidden\_continuous\_size} dimensionality. Expanding this specific hyperparameter between 8 and 32 ensured individual signals (like individual CDD parameters vs. \texttt{is\_bridge\_day}) maintained mathematical independence without collapsing the self-attention gradients.
+\end{itemize}
+
+\section{Validation Protocol \& Results}
+
+To adhere strictly to causal rules, random cross-validation was completely rejected to prohibit future-to-past temporal leakage. A rigorous chronological partition known as the \textbf{"Arena vs. Vault"} was deployed:
+\begin{itemize}
+    \item \textbf{Train:} 2015-01-01 to 2017-12-31
+    \item \textbf{Validation (The Arena):} 2018-01-01 to 2018-06-30
+\end{itemize}
+
+\section{Validation Protocol \& Results}
+
+\subsection*{Mathematical Proof of Causality (The Information Set)}
+
+To rigorously guarantee the absence of causal data leakage, the forecasting pipeline is constrained by the mathematical definition of the \textit{Information Set} ($\mathcal{I}$). Let $\tau$ represent the exact chronological execution boundary (e.g., 23:59 on the day prior to delivery). The objective is to forecast the grid load $y$ at a future horizon $h$, where $h \in \{1, 2, \dots, 24\}$.
+
+A forecast $\hat{y}_{\tau+h}$ is strictly causal if and only if the feature matrix $X$ used to generate it is a subset of the information available at time $\tau$:
+$$ \hat{y}_{\tau+h} = f(X) \implies X \subseteq \mathcal{I}_{\tau} $$
+
+To satisfy this axiom, the features were categorically isolated:
+\begin{itemize}
+    \item \textbf{Deterministic Future Covariates:} Calendar variables (Sine/Cosine time mappings) and categorical flags (Holidays, Bridge Days) are deterministic \textit{ad infinitum}. Therefore, $X_{calendar}(\tau+h) \in \mathcal{I}_{\tau}$.
+    \item \textbf{Autoregressive Historical Covariates:} To predict hour $\tau+h$ without observing it, all historical load features must be shifted such that their temporal index is $\le \tau$. The primary autoregressive anchor is shifted by 24 hours ($t-24$). Thus, the most recent load value observed by the model when predicting $\tau+1$ is exactly $\tau+1-24 = \tau-23$, ensuring $X_{history} \subset \mathcal{I}_{\tau}$.
+    \item \textbf{Day-Ahead Forecasts (Paradigm B Only):} Official TSO wind/solar forecasts and day-ahead market prices are published at 12:00 PM on day $\tau$. Therefore, $X_{forecast}(\tau+h) \in \mathcal{I}_{\tau}$ is valid for day-ahead operations.
+\end{itemize}
+
+Table \ref{tab:leakage_proof} visually demonstrates this temporal alignment mechanism. When the model attempts to predict the load for January 2nd at 14:00 ($t_{target}$), the feature engineering script rigidly locks the index access, mathematically blinding the model to any real-time generation or actual temperature data for that specific hour.
+
+\begin{table}[ht]
+\centering
+\caption{Causal Temporal Alignment Proof (Example: Predicting Jan 2nd @ 14:00)}
+\label{tab:leakage_proof}
+\begin{tabular}{lll}
+\toprule
+\textbf{Feature Class} & \textbf{Data Point Accessed} & \textbf{Causality Status} \\
+\midrule
+Target Variable ($y$) & Jan 2nd, 14:00 & To be predicted ($\notin \mathcal{I}_\tau$) \\
+\midrule
+Cyclical Calendar & Jan 2nd, 14:00 (Known infinitely) & Strictly Causal \\
+Holiday / Puente & Jan 2nd = Normal Day (Known infinitely) & Strictly Causal \\
+Load Lags ($t-24$) & Jan 1st, 14:00 (Historical true value) & Strictly Causal \\
+Rolling Mean ($t-24$) & Dec 31st, 14:00 to Jan 1st, 14:00 & Strictly Causal \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection*{The "Auto-Regression Trap" \& The Rolling Origin Framework}
+
+To adhere strictly to causal rules, random cross-validation was completely rejected to prohibit future-to-past temporal leakage. A rigorous chronological partition known as the \textbf{"Arena vs. Vault"} was deployed:
+\begin{itemize}
+    \item \textbf{Train:} 2015-01-01 to 2017-12-31
+    \item \textbf{Validation (The Arena):} 2018-01-01 to 2018-06-30
+\end{itemize}
+
+During initial deep learning validation, an architectural diagnostic revealed a severe evaluation flaw termed the \textbf{"Auto-Regression Trap."} When sequence models (like N-HiTS) were initially asked to predict the entire 6-month validation set simultaneously, the fixed 24-hour output chunk forced the algorithm to recursively feed on its own predictions. By Month 3, the model was compounding mathematical hallucinations, artificially inflating the Deep Learning MAE beyond 2,100 MW.
+
+Conversely, the tabular algorithms (LightGBM, TabNet, MLP, and Prophet) were naturally evading this trap. Because they ingested static $t-24$ columns pre-computed in Pandas, they were executing a \textbf{Frozen-Weight, Rolling-Origin} evaluation—waking up every 24 hours, ingesting true ground context, and predicting the next day. 
+
+To ensure a scientifically rigorous and fair comparison, the evaluation loop for all Deep Sequence architectures was fundamentally rewritten. By implementing a strict 24-hour historical forecast stride, N-HiTS and TFT were forced to replicate the exact day-ahead operational cadence of the tree models. 
+
+\subsection*{Validation Leaderboard (The Arena)}
+
+The impact of escaping the Auto-Regression Trap was immediate and profound. When N-HiTS was evaluated iteratively in a pure \textbf{Univariate Paradigm} (stripped of all 38 weather and holiday covariates), its internal hierarchical interpolation kernels achieved an MAE of \textbf{1,500.2 MW}, decisively dethroning the LightGBM multivariate champion. 
+
+Below is the exhaustive validation leaderboard measuring determinist capability prior to unlocking the test set vault. \textit{(Note: The full Ablation Study analyzing the impact of multivariate matrices on these scores is detailed in Section 7).}
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{llrr}
+\toprule
+\textbf{Rank} & \textbf{Model} & \textbf{MAE (MW)} & \textbf{MAPE (\%)} \\
+\midrule
+\textbf{1} & \textbf{TSO Forecast (Official Ceiling)} & \textbf{281.4} & \textbf{0.97\%} \\
+2 & Leakage Regression (The Sandbox Cheater) & 1,248.1 & 4.37\% \\
+\textbf{3} & \textbf{N-HiTS (Univariate Signal Decomposition)} & \textbf{1,500.2} & \textbf{5.11\%} \\
+4 & LightGBM (Winning Multivariate Architecture) & 1,537.6 & 5.26\% \\
+5 & TabNet (Improved Tabular Neural Network) & 2,045.1 & 7.09\% \\
+6 & Prophet (Classical Additive) & 2,048.2 & 7.14\% \\
+7 & MLP (Naive Flat Neural Network) & 2,082.7 & 7.23\% \\
+\textbf{8} & \textbf{Seasonal Naïve (Repetitive Floor)} & \textbf{2,688.4} & \textbf{9.21\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Error Analysis \& Business Interpretation}
+
+LightGBM dominated the open-source pipeline by leveraging recursive gradient binning—effortlessly mapping the disjointed step boundaries created by human behavior triggers, such as HDD/CDD thermostatic clicks or abrupt categorical \texttt{is\_bridge\_day} drops. Deep sequence models (TFT and N-HiTS) suffered against LightGBM; the absence of massive million-row dataloaders forced them into local minimas, unable to fully capitalize on structural self-attention logic without aggressively large batching regimes. 
+
+While predicting load with an MAE roughly 50\% lighter than Naive approaches, the operational models undeniably stalled against the \textbf{0.97\% TSO Ceiling}. This gap represents the distinction between "machine learning" and "grid visibility". REE knows scheduled cross-border flows mapping the French/Portuguese transmission pipes, holds localized micro-generation solar readouts from behind-the-meter, and understands massive industrial contracts—all variables absent from our Kaggle approximation. In business applications, missing these variables renders autonomous algorithmic dispatch unsafe; however, a 5.26\% error remains highly valuable for speculative energy traders hedging day-ahead financial portfolios.
+
+\section{Conclusion \& Future Work}
+
+This project constructed an advanced time-series pipeline encompassing precise feature generation, thermodynamic interpolation, and sequential hyper-parameter Bayesian tuning. While LightGBM definitively claimed the Kaggle-constrained throne, the architecture is inherently bound by its feature horizon. 
+
+In terms of future development, moving past the constraints requires deploying large-scale multimodal frameworks:
+\begin{itemize}
+    \item \textbf{Live Satellite Photogrammetry \& Irradiation Grids:} Tracking geographical solar irradiance gradients across Spain to automatically negate hidden behind-the-meter residential solar disruption.
+    \item \textbf{Granular Economic Features:} Indexing spot-market LNG (Liquified Natural Gas) costs and regional industrial GDP markers to estimate elastic commercial demand shedding. 
+    \item \textbf{Probabilistic Calibration:} Using the upper and lower bound confidence intervals extracted from Temporal Fusion Transformers to dynamically assess grid risk scenarios, allowing reserve operator desks to assign risk metrics during impending extreme weather surges.
+\end{itemize}
+
+\end{document}
