@@ -8,6 +8,12 @@
 \usepackage{subcaption} % Added to allow side-by-side figures
 \usepackage{microtype} % Automatically fixes line-breaking and margin bleeds
 
+% --- NEW STYLE ADJUSTMENTS ---
+\usepackage{parskip}   % 1. Adds clear vertical space BETWEEN paragraphs and removes the default first-line indentation.
+\usepackage{setspace}  % 2. Allows you to adjust the 'interlineado' (line spacing WITHIN the paragraph).
+\linespread{1}        
+% -----------------------------
+
 \geometry{a4paper, margin=1.2in}
 
 \title{Advanced Time Series Forecasting \\ \large Spain Energy Demand Forecasting}
@@ -34,13 +40,15 @@ The cost of handling imbalances is around 3–7\% of the value of electricity co
     \item \textbf{Physical Grid Stability:} Long-term forecasting challenges accompany the energy transition. Increased electricity consumption via electrified heat and mobility, in combination with decreasing synchronous generation, might strengthen load fluctuations and thus increase volatility. Nonetheless, studies so far have only sporadically compared overall impact sizes of decreasing conventional power plant inertia with increasing electricity demand uncertainty.
 \end{itemize}
 
+\vspace{0.2cm}
+\noindent \textbf{A Note on Mean Absolute Scaled Error (MASE):} \\
+While MASE is frequently cited as a gold-standard metric in modern forecasting literature, it was intentionally excluded from this evaluation pipeline. MASE was mathematically designed to facilitate cross-series comparisons by normalizing errors across datasets of vastly different magnitudes (e.g., comparing a 30,000 MW national grid against a 50 MW micro-grid). Because this project operates exclusively on a single macro-series (the Spanish national grid) with a uniform scale, scale-independent normalization is redundant. MAE and MAPE provide complete, directly interpretable physical and financial evaluations for this specific operational context.
 The core objective of this project is to use machine learning models to forecast the national electricity demand (\texttt{total\_load\_actual}), particularly the continuous $t+1$ to $t+24$ hourly MWh profile.
 
 Three metrics were chosen:
 \begin{itemize}
 \item \textbf{Mean Absolute Error (MAE):} Represents the \textit{absolute physical imbalance in Megawatts} indicating the exact magnitude of reserve generation the TSO must spin up. \textit{Since we will do probabilistic forecasting later, the point forecast that minimizes the expected MAE is the \textbf{conditional median} of the target distribution, rendering the 50th percentile a more robust estimator for this project than the mean.}    
 \item \textbf{Mean Absolute Percentage Error (MAPE):} The definitive \textit{relative business metric}, highly intuitive and widely understood to scale error relative to baseline load size.
-\item \textbf{Mean Absolute Scaled Error (MASE):} The \textit{error scaled relative to the in-sample benchmark (Naive Seasonal)}, providing a robust statistical measure of relative improvement.
 \end{itemize}
 
 \section{Exploratory Data Analysis \& Quality Control}
