@@ -1,11 +1,12 @@
 # src/tune_mlp.py
-import pandas as pd
-import numpy as np
-from sklearn.neural_network import MLPRegressor
-import optuna
-from sklearn.metrics import mean_absolute_error
 from pathlib import Path
+
 import joblib
+import numpy as np
+import optuna
+import pandas as pd
+from sklearn.metrics import mean_absolute_error
+from sklearn.neural_network import MLPRegressor
 
 # Map database-safe strings to the actual Python tuples
 LAYER_MAPPING = {
@@ -26,7 +27,7 @@ def objective(trial):
     val = df_mlp.loc['2018-01-01 00:00:00':'2018-06-30 23:00:00']
     
     X_train = train.drop(columns=['total load actual'])
-    y_train = train['total load actual'] # MLPRegressor expects 1D array for training
+    y_train = train['total load actual'] 
     X_val = val.drop(columns=['total load actual'])
     y_val = val['total load actual']
     
@@ -44,13 +45,12 @@ def objective(trial):
         "random_state": 42
     }
     
-    # 4. Train and Predict (Output will be in scaled format, e.g., 0.5)
+    # 4. Train and Predict 
     model = MLPRegressor(**params)
     model.fit(X_train, y_train)
     preds_scaled = model.predict(X_val)
     
     # 5. Inverse Transform to calculate REAL Megawatt error
-    # Scaler requires 2D array, so we reshape, transform, and flatten back to 1D
     preds_unscaled = y_scaler.inverse_transform(preds_scaled.reshape(-1, 1)).flatten()
     y_val_unscaled = y_scaler.inverse_transform(y_val.values.reshape(-1, 1)).flatten()
     
@@ -65,19 +65,29 @@ if __name__ == "__main__":
     print("Best Parameters:", study.best_params)
     
     # Retrain and save champion
+    print("\n🚀 Retraining Champion MLP with Early Stopping...")
     df_mlp = pd.read_parquet("data/model_inputs/df_mlp.parquet", engine="fastparquet")
     train = df_mlp.loc[:'2017-12-31 23:00:00']
     X_train = train.drop(columns=['total load actual'])
     y_train = train['total load actual']
     
-    # Extract the best parameters and map the string back to the correct tuple format
     best_params = study.best_params.copy()
     best_layer_str = best_params.pop("hidden_layer_sizes_str")
     best_params["hidden_layer_sizes"] = LAYER_MAPPING[best_layer_str]
     
-    champion_mlp = MLPRegressor(**best_params, activation='relu', solver='adam', max_iter=100, random_state=42)
+    # Final Fit WITH early stopping protection explicitly defined
+    champion_mlp = MLPRegressor(
+        **best_params, 
+        activation='relu', 
+        solver='adam', 
+        max_iter=150, 
+        early_stopping=True,     # Activates stopping
+        validation_fraction=0.1, # Holds out 10% of X_train internally
+        n_iter_no_change=10,     # Patience
+        random_state=42
+    )
     champion_mlp.fit(X_train, y_train)
     
     Path("models").mkdir(exist_ok=True)
     joblib.dump(champion_mlp, "models/mlp_champion.pkl")
-    print("✅ Champion saved to models/mlp_champion.pkl")
+    print(f"✅ Champion saved to models/mlp_champion.pkl (Stopped optimally at epoch {champion_mlp.n_iter_})")

@@ -1,0 +1,39 @@
+# Ignore model weights and checkpoints
+models/
+*.pt
+*.ckpt
+*.pkl
+*.json
+*.txt
+
+# Ignore prompts
+prompts/
+
+
+# Ignore data and databases
+*.txt
+*.db
+archive/
+*.parquet
+*.csv
+
+# Ignore environments and logs
+.venv/
+__pycache__/
+*.log
+logs/
+experiment_logs.txt
+
+# Ignore LaTeX build files
+*.aux
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# Ignore Jupyter checkpoints & backup files
+.ipynb_checkpoints/
+*backup*.ipynb
+deleted.ipynb
+main-1.*

@@ -1,12 +1,14 @@
 # src/tune_tabnet.py
-import pandas as pd
-import numpy as np
-from pytorch_tabnet.tab_model import TabNetRegressor
-import optuna
-from sklearn.metrics import mean_absolute_error
 from pathlib import Path
-import torch
+
 import joblib
+import numpy as np
+import optuna
+import pandas as pd
+import torch
+from pytorch_tabnet.tab_model import TabNetRegressor
+from sklearn.metrics import mean_absolute_error
+
 
 def objective(trial):
     # 1. Load the Pre-Scaled Matrix AND the Target Scaler
@@ -19,7 +21,6 @@ def objective(trial):
     
     # CRITICAL: TabNet requires pure NumPy arrays, not Pandas DataFrames
     X_train = train.drop(columns=['total load actual']).values
-    # TabNet expects 2D targets: shape (N, 1)
     y_train = train['total load actual'].values.reshape(-1, 1) 
     
     X_val = val.drop(columns=['total load actual']).values
@@ -51,11 +52,9 @@ def objective(trial):
         virtual_batch_size=128
     )
     
-    # Output will be scaled (e.g., 0.5)
     preds_scaled = model.predict(X_val)
     
     # 5. Inverse Transform to calculate REAL Megawatt error
-    # TabNet predictions and y_val are already 2D (N, 1), so we directly transform and flatten
     preds_unscaled = y_scaler.inverse_transform(preds_scaled).flatten()
     y_val_unscaled = y_scaler.inverse_transform(y_val).flatten()
     
@@ -70,13 +69,19 @@ if __name__ == "__main__":
     print("Best Parameters:", study.best_params)
     
     # Retrain and save champion
+    print("\n🚀 Retraining Champion TabNet with Early Stopping...")
     df_mlp = pd.read_parquet("data/model_inputs/df_mlp.parquet", engine="fastparquet")
+    
+    # Re-split data to pass the eval_set into the final training block
     train = df_mlp.loc[:'2017-12-31 23:00:00']
+    val = df_mlp.loc['2018-01-01 00:00:00':'2018-06-30 23:00:00']
     
     X_train = train.drop(columns=['total load actual']).values
     y_train = train['total load actual'].values.reshape(-1, 1)
     
-    # Unpack best params
+    X_val = val.drop(columns=['total load actual']).values
+    y_val = val['total load actual'].values.reshape(-1, 1)
+    
     best_n_da = study.best_params['n_da']
     best_gamma = study.best_params['gamma']
     best_lr = study.best_params['lr']
@@ -89,9 +94,13 @@ if __name__ == "__main__":
         seed=42
     )
     
+    # Final Fit WITH early stopping protection
     champion_tabnet.fit(
         X_train=X_train, y_train=y_train,
+        eval_set=[(X_val, y_val)],
+        eval_metric=['mae'],
         max_epochs=100, 
+        patience=10,
         batch_size=1024,
         virtual_batch_size=128
     )

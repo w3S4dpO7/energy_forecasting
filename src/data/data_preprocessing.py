@@ -1,20 +1,36 @@
-# src/data_processing.py
+# src/data_preprocessing.py
 import pandas as pd
 import numpy as np
 from pathlib import Path
 
+"""
+
 def process_energy_base(energy_path: str) -> pd.DataFrame:
-    """Extracts target and enforces chronologically sorted index."""
+    Extracts target and enforces chronologically sorted index. 
+       Keeps all columns for downstream Sandbox split.
     df = pd.read_csv(energy_path)
     
     # Standardize index
     df['time'] = pd.to_datetime(df['time'], utc=True).dt.tz_convert('Europe/Madrid').dt.tz_localize(None)
     df = df.set_index('time').sort_index()
     
-    # Keep only the target, isolate from all leakage (generation/forecast/price)
-    target_df = df[['total load actual']].copy()
+    return df
+"""
+
+def process_energy_base(energy_path: str) -> pd.DataFrame:
+    """Extracts target and enforces chronologically sorted index. 
+       Keeps all columns for downstream Sandbox split."""
+    df = pd.read_csv(energy_path)
     
-    return target_df
+    # Standardize index
+    df['time'] = pd.to_datetime(df['time'], utc=True).dt.tz_convert('Europe/Madrid').dt.tz_localize(None)
+    df = df.set_index('time').sort_index()
+    
+    # ── THE FIX: Crush DST duplicates and enforce strict hourly frequency ──
+    df = df[~df.index.duplicated(keep='first')]
+    df = df.asfreq('h').ffill()
+    
+    return df
 
 def process_weather_pipeline(weather_path: str) -> pd.DataFrame:
     """Executes the Honors-Level Weather Pipeline (Thermodynamics, Flags, Pivot)."""
@@ -76,7 +92,6 @@ def build_master_dataset(energy_path: str, weather_path: str, output_path: str):
     print(f"Master dataset saved to {output_path} with shape {master_df.shape}")
 
 if __name__ == "__main__":
-    # Adjust paths according to your repository structure
     RAW_ENERGY = "archive/energy_dataset.csv"
     RAW_WEATHER = "archive/weather_features.csv"
     OUTPUT_MASTER = "data/processed/master_df.csv"

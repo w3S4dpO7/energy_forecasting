@@ -70,9 +70,9 @@ echo ""
 echo "=================================================="
 echo "🚀 STAGE 5: SEQUENCE DL - TFT (THE ORACLE)"
 echo "=================================================="
-uv run python -m src.tune_tft --mode initial
-uv run python -m src.tune_tft --mode improved
-uv run python -m src.tune_tft --mode sandbox
+uv run python -m src.train_tft --mode initial
+uv run python -m src.train_tft --mode improved
+uv run python -m src.train_tft --mode sandbox
 
 echo "=================================================="
 echo "🏆 ALL EXPERIMENTS COMPLETED SUCCESSFULLY! 🏆"

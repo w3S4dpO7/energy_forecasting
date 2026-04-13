@@ -1,17 +1,21 @@
 # src/tune_lightgbm.py
 import argparse
-import pandas as pd
+import warnings
+from pathlib import Path
+
 import lightgbm as lgb
 import optuna
+import pandas as pd
 from sklearn.metrics import mean_absolute_error
-from pathlib import Path
+
+warnings.filterwarnings("ignore")
 
 # ── 1. COMMAND LINE ARGUMENTS ──
 parser = argparse.ArgumentParser(description="LightGBM Bayesian Optimization pipeline.")
 parser.add_argument(
     "--mode", 
     type=str, 
-    choices=["initial", "improved", "sandbox"], 
+    choices=["initial", "improved", "sandbox_a", "sandbox_b"], 
     default="improved",
     help="Select the feature engineering dataset to use."
 )
@@ -22,9 +26,12 @@ MODE = args.mode
 if MODE == "initial":
     DATA_PATH = "data/model_inputs/df_trees.parquet" 
     MODEL_NAME = "lgb_initial"
-elif MODE == "sandbox":
-    DATA_PATH = "data/model_inputs/df_sandbox_trees.parquet"
-    MODEL_NAME = "lgb_sandbox"
+elif MODE == "sandbox_a":
+    DATA_PATH = "data/model_inputs/df_sandbox_a_trees.parquet"
+    MODEL_NAME = "lgb_sandbox_a"
+elif MODE == "sandbox_b":
+    DATA_PATH = "data/model_inputs/df_sandbox_b_trees.parquet"
+    MODEL_NAME = "lgb_sandbox_b"
 else: # improved
     DATA_PATH = "data/model_inputs/df_improved_trees.parquet"
     MODEL_NAME = "lgb_improved"
@@ -51,15 +58,28 @@ def objective(trial):
     X_val = val.drop(columns=['total load actual'])
     y_val = val['total load actual']
     
-    # Define the Bayesian Search Space
+    # ── THE DYNAMIC SEARCH SPACE (INFORMATION BOTTLENECK) ──
+    if "sandbox" in MODE:
+        # Constrained capacity for noisy human-dispatched data
+        max_depth = trial.suggest_int("max_depth", 3, 7)
+        num_leaves = trial.suggest_int("num_leaves", 10, 60)
+        # Aggressive column dropping (Tree Dropout) to prevent generation feature dominance
+        colsample = trial.suggest_float("colsample_bytree", 0.3, 0.7) 
+    else:
+        # Wide capacity for clean, stable thermodynamic data
+        max_depth = trial.suggest_int("max_depth", 4, 12)
+        num_leaves = trial.suggest_int("num_leaves", 20, 150)
+        colsample = trial.suggest_float("colsample_bytree", 0.5, 1.0)
+    
     params = {
         "n_estimators": trial.suggest_int("n_estimators", 100, 1000),
         "learning_rate": trial.suggest_float("learning_rate", 1e-3, 0.1, log=True),
-        "num_leaves": trial.suggest_int("num_leaves", 20, 150),
-        "max_depth": trial.suggest_int("max_depth", 4, 12),
-        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+        "num_leaves": num_leaves,
+        "max_depth": max_depth,
+        "colsample_bytree": colsample,
         "random_state": 42,
-        "n_jobs": -1
+        "n_jobs": 4, # Safe CPU threading
+        "verbose": -1
     }
     
     # Train and Evaluate
@@ -77,7 +97,7 @@ if __name__ == "__main__":
         load_if_exists=True,
         direction="minimize"
     )
-    study.optimize(objective, n_trials=50) # Will take roughly 5-10 minutes
+    study.optimize(objective, n_trials=50)
     
     print(f"\n✅ Best Validation MAE: {study.best_value:,.1f}")
     print("Best Parameters:", study.best_params)
@@ -87,7 +107,7 @@ if __name__ == "__main__":
     X_train = train.drop(columns=['total load actual'])
     y_train = train['total load actual']
     
-    champion_lgb = lgb.LGBMRegressor(**study.best_params, random_state=42, n_jobs=-1)
+    champion_lgb = lgb.LGBMRegressor(**study.best_params, random_state=42, n_jobs=4, verbose=-1)
     champion_lgb.fit(X_train, y_train)
     
     Path("models").mkdir(exist_ok=True)
