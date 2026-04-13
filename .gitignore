@@ -9,6 +9,8 @@ models/
 # Ignore prompts
 prompts/
 
+# Ignore images
+*.png
 
 # Ignore data and databases
 *.txt

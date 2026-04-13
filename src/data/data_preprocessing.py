@@ -3,20 +3,6 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-"""
-
-def process_energy_base(energy_path: str) -> pd.DataFrame:
-    Extracts target and enforces chronologically sorted index. 
-       Keeps all columns for downstream Sandbox split.
-    df = pd.read_csv(energy_path)
-    
-    # Standardize index
-    df['time'] = pd.to_datetime(df['time'], utc=True).dt.tz_convert('Europe/Madrid').dt.tz_localize(None)
-    df = df.set_index('time').sort_index()
-    
-    return df
-"""
-
 def process_energy_base(energy_path: str) -> pd.DataFrame:
     """Extracts target and enforces chronologically sorted index. 
        Keeps all columns for downstream Sandbox split."""
@@ -26,9 +12,11 @@ def process_energy_base(energy_path: str) -> pd.DataFrame:
     df['time'] = pd.to_datetime(df['time'], utc=True).dt.tz_convert('Europe/Madrid').dt.tz_localize(None)
     df = df.set_index('time').sort_index()
     
-    # ── THE FIX: Crush DST duplicates and enforce strict hourly frequency ──
+    # Crush DST duplicates and enforce strict hourly frequency
     df = df[~df.index.duplicated(keep='first')]
-    df = df.asfreq('h').ffill()
+    
+    # DO NOT use .ffill() here! We must preserve the target NaNs so we can drop them.
+    df = df.asfreq('h')
     
     return df
 

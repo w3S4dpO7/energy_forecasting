@@ -53,13 +53,13 @@ def build_tree_features(master_df: pd.DataFrame) -> pd.DataFrame:
         ((dayofweek_series == 4) & holiday_dates.shift(24).fillna(False).astype(bool))
     ).astype(int)
 
-    # Core Lags & Fuzzy Lags
+    # Core Lags & Fuzzy Lags (Strictly backward-looking to prevent h=24 leakage)
     df['load_t_24'] = df['total load actual'].shift(24)
     df['load_t_168'] = df['total load actual'].shift(168)
-    df['load_t_23'] = df['total load actual'].shift(23)
     df['load_t_25'] = df['total load actual'].shift(25)
-    df['load_t_167'] = df['total load actual'].shift(167)
+    df['load_t_26'] = df['total load actual'].shift(26)
     df['load_t_169'] = df['total load actual'].shift(169)
+    df['load_t_170'] = df['total load actual'].shift(170)
     
     # 24h Momentum
     prev_day_series = df['total load actual'].shift(24)
@@ -85,7 +85,8 @@ def build_intraday_tree_features(master_df: pd.DataFrame) -> pd.DataFrame:
     df['rolling_min_6h']  = prev_hour_series.rolling(window=6).min()
     
     # Drop Day-Ahead specific lags
-    df = df.drop(columns=['load_t_24', 'load_t_168', 'load_t_23', 'load_t_25', 'load_t_167', 'load_t_169'], errors='ignore')
+    df = df.drop(columns=['load_t_24', 'load_t_168', 'load_t_25', 'load_t_26', 'load_t_169', 'load_t_170'], errors='ignore')
+    
     return df.dropna()
 
 def build_mlp_features(master_df: pd.DataFrame, train_end_date: str = '2017-12-31 23:00:00') -> tuple[pd.DataFrame, StandardScaler]:

@@ -501,77 +501,101 @@ def plot6_horizon_flip(df, save_path=None):
     plt.show()
 
 # ═══════════════════════════════════════════════════════════════════
-# PLOT 7  ·  The Grand Finale (The Evolutionary Staircase)
+# PLOT 7  ·  Final Architectural Evaluation
 # ═══════════════════════════════════════════════════════════════════
 def plot7_staircase(df, save_path=None):
 
     naive    = _first_valid(_find_model(df, "Naïve"), _find_model(df, "Naive"))
     best_uni = _first_valid(_find_model(df, "N-HiTS", "Univariate"), _find_model(df, "N-HiTS", "168h"))
-    # knowledge retrieval: Fix ambiguous truth value lookup. Ceiling needs unique color. Lookup specifically for h=1 for best intraday.
     best_mul = _first_valid(_find_model(df, "LightGBM", "Improved"), _find_model(df, "LightGBM"))
     
     # Strict lookup specifically for h=1 ( operational evaluation phase )
     df_h1 = df[df.get("Horizon", "").str.contains("h=1", case=False, na=False) | df["Model"].str.contains("intraday", case=False, na=False) | df["Model"].str.contains("mlops", case=False, na=False)]
-    best_int = _first_valid(_find_model(df_h1, "MLOps"), _find_model(df_h1, "LightGBM"))
+    
+    # FIX: Explicitly target the Daily Retrain model to grab the 265 MW result
+    best_int = _first_valid(
+        _find_model(df_h1, "Daily Retrain"), 
+        _find_model(df_h1, "MLOps"), 
+        _find_model(df_h1, "Retrain")
+    )
+    if best_int is None: # Fallback
+        best_int = _first_valid(_find_model(df_h1, "LightGBM"))
     
     tso      = _first_valid(_find_model(df, "TSO", "Ceiling"), _find_model(df, "TSO"))
-    
-    # knowledge retrieval: lookup logic failing ceiling. Specific lookup for linear regression (God mode/sandbox b). Set color Amethyst functionally.
-
-    # Ceiling is specifically Linear Regression in Sandbox B (God Mode)
     ceiling  = _first_valid(_find_model(df, "Linear Regression", "God"), _find_model(df, "God Mode"), _find_model(df, "Leakage"))
 
-    # Map models to text and colors without hardcoded numbers
-    milestones_raw = [
-        (naive,    "The Floor\n(Seasonal Naïve 168h)",     PALETTE["floor"]),
-        (best_mul, "Best Day-Ahead Multivariate\n(LightGBM Trees)", PALETTE["trees"]),
-        (best_uni, "Best Day-Ahead Univariate\n(N-HiTS Deep Sequence)", PALETTE["univariate"]),
-        (ceiling,  "The Leakage Limit\n(Linear Regression/ God Mode)",PALETTE["ceiling"]), # Ceiling is amethyst functionally
-        (tso,      "The Target\n(TSO Official Forecast)",  PALETTE["tso"]),
-        (best_int, "Best Intraday + MLOps\n(LightGBM h=1 Adaptive)", PALETTE["intra_multi"]),
+    # We exclusively plot the machine learning architectures as bars now
+    models_to_plot = [
+        (best_mul, "Day-Ahead Multivariate\n(LightGBM)", PALETTE["trees"]),
+        (best_uni, "Day-Ahead Univariate\n(N-HiTS)", PALETTE["univariate"]),
+        (best_int, "Intraday + Continuous Learning\n(LightGBM)", PALETTE["intra_multi"]),
     ]
 
-    valid = [(label, m["MAE (MW)"], color) for m, label, color in milestones_raw if m is not None]
+    valid = [(label, m["MAE (MW)"], color) for m, label, color in models_to_plot if m is not None]
     if len(valid) < 3: return
 
     # Sort worst to best
     valid.sort(key=lambda x: x[1], reverse=True)
     
-    # circled numbers added functionally
-    numbering = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧"]
+    numbering = ["①", "②", "③"]
     labels = [f"{numbering[i]} {v[0]}" for i, v in enumerate(valid)]
     maes   = [v[1] for v in valid]
     colors = [v[2] for v in valid]
 
-    fig, ax = plt.subplots(figsize=(13, max(4.5, len(valid) * 0.85 + 1.5)))
+    fig, ax = plt.subplots(figsize=(13, max(4.5, len(valid) * 1.2 + 2.0))) 
 
     bars = ax.barh(range(len(valid)), maes, color=colors,
-                edgecolor="white", linewidth=1.4, height=0.65)
+                edgecolor="white", linewidth=1.4, height=0.55)
 
     ax.set_yticks(range(len(valid)))
-    ax.set_yticklabels(labels, fontsize=10, linespacing=1.3)
+    ax.set_yticklabels(labels, fontsize=11, linespacing=1.3)
 
-    x_max = max(maes) * 1.15
+    x_max = naive["MAE (MW)"] * 1.10 if naive is not None else max(maes) * 1.15
     ax.set_xlim(0, x_max)
 
-    # ✅ CORRECT LOCATION
-    _apply_fixed_benchmarks(ax, df, shade_target=True)
+    # Add the benchmark lines (turn OFF default shading so we can custom shade)
+    _apply_fixed_benchmarks(ax, df, shade_target=False)
     
+    # ─── CUSTOM ZONAL SHADING & ANNOTATIONS (Formalized) ───
+    if tso is not None and ceiling is not None and naive is not None:
+        v_tso = tso["MAE (MW)"]
+        v_leak = ceiling["MAE (MW)"]
+        v_naive = naive["MAE (MW)"]
+        
+        # Calculate optimal Y-height for text (top of the plot)
+        y_text = len(valid) - 0.25 
+        
+        # Region 1: Intraday Advantage
+        ax.axvspan(0, v_tso, facecolor=PALETTE["intra_multi"], alpha=0.1, zorder=0)
+        ax.text(v_tso / 2, y_text, "Intraday Advantage Zone\n(Outperforming TSO Benchmark)", 
+                ha='center', va='bottom', fontsize=9.5, fontweight='bold', color=PALETTE["intra_multi"], alpha=0.95)
+                
+        # Region 2: Structural Deficit
+        ax.axvspan(v_tso, v_leak, facecolor=PALETTE["ceiling"], alpha=0.08, zorder=0)
+        ax.text((v_tso + v_leak) / 2, y_text, "Structural Data Deficit\n(Unobservable TSO Telemetry)", 
+                ha='center', va='bottom', fontsize=9.5, fontweight='bold', color=PALETTE["ceiling"], alpha=0.95)
+                
+        # Region 3: Standard Arena
+        ax.axvspan(v_leak, v_naive, facecolor=PALETTE["tabular"], alpha=0.06, zorder=0)
+        ax.text((v_leak + v_naive) / 2, y_text, "Public Data Baseline\n(Standard Model Optimization)", 
+                ha='center', va='bottom', fontsize=9.5, fontweight='bold', color=PALETTE["tabular"], alpha=0.85)
+
+    # Value annotations inside/next to bars
     for bar, mae_val in zip(bars, maes):
         ax.text(bar.get_width() + x_max * 0.015, bar.get_y() + bar.get_height() / 2,
                 f"{mae_val:,.0f} MW", va="center", ha="left",
                 fontsize=ANNOTATION_FONTSIZE, fontweight="bold", color="#333333")
 
-    # Add Improvement percentages (deltas between bars)
+    # Add Improvement percentages (deltas between the remaining architectural bars)
     for i in range(len(valid) - 1):
         delta = maes[i] - maes[i + 1]
         pct   = delta / maes[i] * 100
         mid_y = i + 0.5
         ax.annotate(f"−{delta:,.0f}\n({pct:.0f}%)",
                     xy=(maes[i + 1], mid_y), fontsize=8, color="#555555", ha="center", va="center",
-                    bbox=dict(boxstyle="round,pad=0.25", facecolor="#FFFFFF", edgecolor="#CCCCCC", alpha=0.85))
+                    bbox=dict(boxstyle="round,pad=0.25", facecolor="#FFFFFF", edgecolor="#CCCCCC", alpha=0.85), zorder=10)
 
-    _style_ax(ax, title="Plot 7 · The Grand Finale — The Evolutionary Staircase of Forecasting")
+    _style_ax(ax, title="Plot 7 · Final Architectural Evaluation — Predictive Performance Across Horizons")
     plt.tight_layout()
     if save_path: fig.savefig(save_path, dpi=200, bbox_inches="tight")
     fig.savefig("results_bar_chart.png", dpi=300, bbox_inches="tight")
