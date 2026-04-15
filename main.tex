@@ -7,6 +7,7 @@
 \usepackage{amsmath}
 \usepackage{subcaption} % Added to allow side-by-side figures
 \usepackage{microtype} % Automatically fixes line-breaking and margin bleeds
+\usepackage{float}
 
 % --- NEW STYLE ADJUSTMENTS ---
 \usepackage{parskip}   % 1. Adds clear vertical space BETWEEN paragraphs and removes the default first-line indentation.
@@ -26,11 +27,11 @@
 
 \section{Executive Summary}
 
-This report describes the end-to-end development of an hourly national electricity demand forecasting pipeline for the Spanish peninsula. Empirically extracted from a chronologically un-leaked holdout validation set, the study uncovers a deep architectural bifurcation.
+This report describes the end-to-end development of an hourly national electricity demand forecasting pipeline for the Spanish peninsula. Evaluated on a strictly chronological holdout set, the study uncovers a clear architectural bifurcation based on the forecasting horizon.
 
 Under strict \textbf{Day-Ahead ($h=24$)} regulatory constraints, deep sequential signal decomposition proved superior. \textbf{Univariate N-HiTS} achieved a Mean Absolute Error (MAE) of \textbf{1,466.4 MW (5.08\% MAPE)}, outperforming the best multivariate architecture (LightGBM at 1,540.5 MW). However, all Day-Ahead models failed to surpass the official Transmission System Operator (\textbf{TSO Ceiling}), which dominates the 24-hour horizon with a \textbf{0.97\% MAPE} due to privileged visibility into cross-border flows and behind-the-meter generation.
 
-To overcome this physical data limitation, the pipeline was strategically pivoted to a high-frequency \textbf{Intraday ($h=1$)} horizon augmented with a simulated Continuous Learning (MLOps) retraining loop. Operating in this agile paradigm, the \textbf{Multivariate LightGBM} model achieved an extraordinary test-set MAE of \textbf{251.9 MW (0.88\% MAPE)}, successfully \textbf{shattering the test-set TSO ceiling of 258.6 MW (0.89\% MAPE)}. This definitively proves that while algorithmic complexity cannot compensate for missing structural data at long horizons, high-frequency execution and continuous gradient boosting can algorithmically defeat traditional grid operator forecasts.
+To overcome this physical data limitation, the pipeline was pivoted to a high-frequency \textbf{Intraday ($h=1$)} horizon augmented with a simulated Continuous Learning (MLOps) retraining loop. Operating in this agile paradigm, the \textbf{Multivariate LightGBM} model achieved a test-set MAE of \textbf{251.9 MW (0.88\% MAPE)}, successfully \textbf{surpassing the test-set TSO ceiling of 258.6 MW (0.89\% MAPE)}. This demonstrates that while algorithmic complexity cannot fully compensate for missing structural data at long horizons, high-frequency execution and continuous gradient boosting can successfully rival traditional grid operator forecasts.
 
 \section{Business Context \& Problem Formulation}
 
@@ -40,20 +41,22 @@ The cost of handling imbalances is around 3–7\% of the value of electricity co
     \item \textbf{Physical Grid Stability:} Long-term forecasting challenges accompany the energy transition. Increased electricity consumption via electrified heat and mobility, in combination with decreasing synchronous generation, might strengthen load fluctuations and thus increase volatility. Nonetheless, studies so far have only sporadically compared overall impact sizes of decreasing conventional power plant inertia with increasing electricity demand uncertainty.
 \end{itemize}
 
-\vspace{0.2cm}
-\noindent \textbf{A Note on Mean Absolute Scaled Error (MASE):} \\
-While MASE is frequently cited as a gold-standard metric in modern forecasting literature, it was intentionally excluded from this evaluation pipeline. MASE was mathematically designed to facilitate cross-series comparisons by normalizing errors across datasets of vastly different magnitudes (e.g., comparing a 30,000 MW national grid against a 50 MW micro-grid). Because this project operates exclusively on a single macro-series (the Spanish national grid) with a uniform scale, scale-independent normalization is redundant. MAE and MAPE provide complete, directly interpretable physical and financial evaluations for this specific operational context.
-The core objective of this project is to use machine learning models to forecast the national electricity demand (\texttt{total\_load\_actual}), particularly the continuous $t+1$ to $t+24$ hourly MWh profile.
 
-Three metrics were chosen:
+Two metrics were chosen:
 \begin{itemize}
 \item \textbf{Mean Absolute Error (MAE):} Represents the \textit{absolute physical imbalance in Megawatts} indicating the exact magnitude of reserve generation the TSO must spin up. \textit{Since we will do probabilistic forecasting later, the point forecast that minimizes the expected MAE is the \textbf{conditional median} of the target distribution, rendering the 50th percentile a more robust estimator for this project than the mean.}    
 \item \textbf{Mean Absolute Percentage Error (MAPE):} The definitive \textit{relative business metric}, highly intuitive and widely understood to scale error relative to baseline load size.
 \end{itemize}
 
+\vspace{0.2cm}
+\noindent \textbf{A Note on Mean Absolute Scaled Error (MASE):} \\
+While MASE is frequently cited as a gold-standard metric in modern forecasting literature and it has been of great utility during the subject, it was intentionally excluded from this evaluation pipeline. MASE was mathematically designed to facilitate cross-series comparisons by normalizing errors across datasets of vastly different magnitudes (e.g., comparing a 30,000 MW national grid against a 50 MW micro-grid). Because this project operates exclusively on a single macro-series (the Spanish national grid) with a uniform scale, scale-independent normalization is redundant. MAE and MAPE provide complete, directly interpretable physical and financial evaluations for this specific operational context.
+The core objective of this project is to use machine learning models to forecast the national electricity demand (\texttt{total\_load\_actual}), particularly the continuous $t+1$ to $t+24$ hourly MWh profile.
+
+
 \section{Exploratory Data Analysis \& Quality Control}
 
-To rigorously prevent temporal data leakage, all Exploratory Data Analysis (EDA) and structural imputations were strictly confined to the \textbf{Training Partition} (2015-01-01 to 2017-12-31). This slice represents 26,301 hours (exactly 75.0\% of the total dataset). The remaining data was sequestered into a \textbf{Validation Set} (2018-01-01 to 2018-06-30, 12.5%) for hyperparameter tuning, and a locked \textbf{Test Set} (2018-07-01 to 2018-12-31, 12.5%) for final operational evaluation.
+To rigorously prevent temporal data leakage, all Exploratory Data Analysis (EDA) and structural imputations were strictly confined to the \textbf{Training Partition} (2015-01-01 to 2017-12-31). This slice represents 26,301 hours (exactly 75.0\% of the total dataset). The remaining data was sequestered into a \textbf{Validation Set} (2018-01-01 to 2018-06-30, 12.5\%) for hyperparameter tuning, and a locked \textbf{Test Set} (2018-07-01 to 2018-12-31, 12.5\%) for final operational evaluation.
 
 During this confined EDA phase, feature-to-feature correlation analysis revealed exceptionally high multicollinearity among cross-city thermodynamic aggregations (e.g., Cooling Degree Days in Madrid vs. Seville consistently exhibited $\rho > 0.95$). This structural redundancy heavily influenced our downstream architectural choices, dictating that neural networks would require aggressive information bottlenecks to avoid parameter bloat, whereas tree-based algorithms could naturally compress this correlated noise.
 
@@ -64,9 +67,9 @@ Furthermore, a deep visual analysis exposed several anomalies requiring correcti
     \item \textbf{Physical Constraints \& Outlier Detection:} Raw API weather data contained physically impossible meteorological anomalies (e.g., transient wind speeds registering at 133 m/s or 479 km/h). These were assumed to be errors and were strictly clipped to physical meteorological maximums (25 m/s or 90 km/h) to prevent gradient explosions. 
     \item \textbf{Sensor Sparsity \& Text-Parsed Density:} Continuous weather sensors (e.g., \texttt{rain\_1h} and \texttt{snow\_3h}) exhibited extreme sparsity, recording absolute zeros over 90\% of the time. To recover underlying meteorological states, dense categorical flags were engineered by parsing the accompanying text descriptions, successfully reconstructing structural weather patterns (see Figure \ref{fig:sparsity}).
     
-    \begin{figure}[ht]
+    \begin{figure}[H]
         \centering
-        \includegraphics[width=0.85\textwidth]{sensor_sparsity.png} % Replace with actual filename
+        \includegraphics[width=0.85\textwidth]{sensor_sparsity.png}
         \caption{Sensor Sparsity vs. Text-Parsed Density. Heavy reliance on raw continuous gauges (left) masks true meteorological events, which were recovered via NLP categorical extraction (right).}
         \label{fig:sparsity}
     \end{figure}
@@ -76,34 +79,34 @@ Furthermore, a deep visual analysis exposed several anomalies requiring correcti
 
 To visualize the underlying macro-dynamics before differencing, Figure \ref{fig:trend} illustrates the structural decomposition of the load. 
 
-\begin{figure}[ht]
+\begin{figure}[H]
     \centering
-    \includegraphics[width=0.85\textwidth]{trend_decomposition.png} % Replace with actual filename
+    \includegraphics[width=0.85\textwidth]{trend_decomposition.png}
     \caption{Trend Decomposition. OLS regression confirms that the macro-trend is practically insignificant (slope $\approx 0.0173$ MW/h), proving the baseline national demand is remarkably stable year-over-year.}
     \label{fig:trend}
 \end{figure}
 
 Because the long-term trend is flat, grid volatility is driven almost entirely by deeply ingrained, overlapping temporal cycles. Figure \ref{fig:seasonality} breaks down this hierarchical seasonality.
 
-\begin{figure}[ht]
+\begin{figure}[H]
     \centering
-    \includegraphics[width=1\textwidth]{hierarchical_seasonality.png} % Replace with actual filename
+    \includegraphics[width=1\textwidth]{hierarchical_seasonality.png}
     \caption{Hierarchical Seasonality. Variance is heavily dictated by the daily solar/human cycle (left), the industrial weekly shutdown (center), and the thermodynamic heating/cooling extremes of winter and summer (right).}
     \label{fig:seasonality}
 \end{figure}
 
 \subsection*{The Causal Leakage Issue}
 
-A critical discovery involved the physical dynamics behind electrical generation. Due to system balancing constraints, the sum of energy generated intrinsically mirrors the electricity demanded almost exactly ($R^2 = 0.9127$, as demonstrated in Figure \ref{fig:leakage}). The only reason $R^2$ is not exactly 1.0 is that Spain also imports and exports electricity across its borders.
+As explicitly mandated by the project guidelines, forecasted values and real-time generation metrics cannot be used as predictive covariates. To empirically demonstrate the mathematical necessity of this constraint, we analyzed the physical dynamics behind electrical generation. Due to strict system balancing requirements, the sum of energy generated intrinsically mirrors the electricity demanded almost exactly ($R^2 = 0.9127$, as demonstrated in Figure \ref{fig:leakage}). The minor variance from a perfect 1.0 correlation is primarily due to cross-border electricity imports and exports.
 
-\begin{figure}[ht]
+\begin{figure}[H]
     \centering
-    \includegraphics[width=0.65\textwidth]{leakage_regression.png} % Replace with actual filename
-    \caption{The Causal Leakage Trap. Real-time generation perfectly predicts real-time load, demonstrating why integrating $t=0$ generation data constitutes severe temporal leakage for an operational forecaster.}
+    \includegraphics[width=0.45\textwidth]{leakage_regression.png}
+    \caption{Empirical Demonstration of Causal Leakage. Real-time generation perfectly predicts real-time load, visually reinforcing the project's strict prohibition against using $t=0$ generation data for operational forecasting.}
     \label{fig:leakage}
 \end{figure}
 
-Consequently, any inclusion of physical real-time data ($t=0$) constitutes severe \textbf{causal data leakage}. To enforce the rules of a genuine day-ahead forecaster, the \texttt{total\_load\_forecast}, raw \texttt{generation} volumes by source, and all real-time \texttt{price} features were strictly purged or shifted in accordance with the forecasting horizon to strictly avoid data leakage.
+Consequently, any inclusion of physical real-time data ($t=0$) would constitute severe \textbf{causal data leakage}, artificially inflating model performance. To enforce the rules of a genuine day-ahead forecaster and adhere strictly to the project statement, the \texttt{total\_load\_forecast}, raw \texttt{generation} volumes by source, and all real-time \texttt{price} features were rigorously purged or shifted in accordance with the forecasting horizon.
 
 \section{Univariate Signal Diagnostics \& Stationarity}
 
@@ -111,11 +114,11 @@ Before delving into complex multivariate algorithms, we followed the theoretical
 
 Figure \ref{fig:signal_evolution} details the step-by-step mathematical orthogonalization of this signal. To stabilize the mean, a \textbf{Seasonal Difference} ($D=1, m=24$) was applied first. This transformation successfully anchored the series around a constant mean of zero, achieving formal dual-test stationarity across both the Augmented Dickey-Fuller (ADF) test ($p < 0.001$) and the Kwiatkowski-Phillips-Schmidt-Shin (KPSS) test (failing to reject the null of stationarity at $p = 0.1$). 
 
-However, mathematical stationarity does not guarantee model viability. A deeper visual inspection of the Autocorrelation Function (ACF) revealed an agonizingly slow decay, driven by a massive, lingering 168-hour weekly cycle that the 24-hour difference could not eliminate. If fed directly into a state-space model, this long-memory weekly inertia would prevent the underlying Kalman filter from converging. 
+However, mathematical stationarity does not guarantee model viability. A visual inspection of the Autocorrelation Function (ACF) revealed a slow decay, driven by a strong 168-hour weekly cycle that the 24-hour difference did not eliminate. If fed directly into a state-space model, this long-memory weekly inertia would prevent the underlying Kalman filter from converging. 
 
-To force the ACF to cut off cleanly and orthogonalize the signal, a \textbf{Standard First Difference} ($d=1$) was applied in conjunction with the seasonal difference. This dual transformation ($d=1, D=1_{24}$) successfully stripped the remaining weekly autocorrelation, acting as a high-pass filter that mapped the grid signal into pure mathematical white noise.
+To force the ACF to cut off cleanly and orthogonalize the signal, a \textbf{Standard First Difference} ($d=1$) was applied in conjunction with the seasonal difference. This dual transformation ($d=1, D=1_{24}$) successfully stripped the remaining weekly autocorrelation, acting as a high-pass filter that mapped the grid signal into white noise.
 
-\begin{figure}[ht]
+\begin{figure}[H]
     \centering
     \includegraphics[width=1\textwidth]{signal_evolution_master.png} 
     \caption{The Mathematical Evolution of the Grid Signal. \textbf{Top Row:} The raw, non-stationary grid load. \textbf{Middle Row:} The application of a seasonal difference ($D=1_{24}$) satisfies the ADF test but leaves a severe 168-hour weekly autocorrelation cycle—a classic "False Positive" stationarity trap. \textbf{Bottom Row:} The combination of seasonal and standard differencing ($d=1, D=1_{24}$) perfectly orthogonalizes the signal into white noise, achieving strict dual-test stationarity.}
@@ -154,7 +157,7 @@ This dataset represents the true constraints of an autonomous grid forecasting s
 \begin{itemize}
     \item \textbf{Thermodynamic Weather Aggregations:} Electricity usage exhibits a distinctly non-linear U-shape driven by extreme hot/cold fluctuations (see Figure \ref{fig:ushape}). To linearize this curve for regression models, raw temperature readings were split into two monotonically increasing vectors: \textbf{Heating Degree Days (HDD)} and \textbf{Cooling Degree Days (CDD)}, pinned precisely to the ASHRAE structural comfort baseline of 18$^\circ$C.
     
-    \begin{figure}[ht]
+    \begin{figure}[H]
         \centering
         \includegraphics[width=1\textwidth]{temperature_ushape.png} 
         \caption{Thermodynamic Signal Decomposition. Raw temperature exhibits a non-linear U-shaped relationship with electricity demand, minimizing around the 18$^\circ$C comfort baseline (left). To linearize this relationship for regression algorithms, the signal is split into Heating Degree Days (center) and Cooling Degree Days (right), creating two monotonically increasing features.}
@@ -183,18 +186,25 @@ This section details the algorithmic escalation across three distinct paradigms.
 \caption{Model Architecture Selection Rationale}
 \label{tab:model_selection}
 \vspace{0.2cm}
-\begin{tabular}{p{2.5cm} p{2.8cm} p{8.2cm}}
+\begin{tabular}{p{3.2cm} p{2.5cm} p{7.8cm}}
 \toprule
 \textbf{Class} & \textbf{Selected} & \textbf{Discarded Alternatives \& Reasoning} \\
 \midrule
-Tabular Trees & LightGBM & \textbf{Random Forest:} Too memory-intensive for 35,000 rows. \textbf{XGBoost:} Histogram binning in LightGBM provided vastly superior training speeds on our local VM. \\
+\textbf{Baselines} & Seasonal Naïve & \textbf{Global Mean / Last Observation (Random Walk):} Grid demand is dominated by massive daily and weekly cycles; non-seasonal baselines are mathematically useless for day-ahead ($h=24$) horizons. \textbf{Drift:} Discarded because EDA confirmed the long-term trend is practically flat. \\
 \midrule
-Deep Sequences & N-HiTS \& TFT & \textbf{RNN/LSTM/GRU:} Suffer from severe vanishing gradients when processing massive 168-hour lookback sequences. \\
+\textbf{Tabular Trees} & LightGBM & \textbf{Random Forest:} Too memory-intensive for 35,000 rows. \textbf{XGBoost:} Histogram binning in LightGBM provided vastly superior training speeds on our local VM. \\
+\midrule
+\textbf{Standard Neural} & TabNet \& MLP & Included to benchmark classical deep feed-forward structures and attention-based tabular routing against gradient-boosted trees. \\
+\midrule
+\textbf{Deep Sequences} & N-HiTS \& TFT & \textbf{RNN/LSTM/GRU:} Suffer from severe vanishing gradients and extreme memory bottlenecks when processing massive 168-hour lookback sequences. \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Hyperparameter tuning was conducted via Optuna. Search spaces were deliberately constrained: learning rates were sampled logarithmically, tree depths were limited to prevent overfitting, and dropout rates in neural networks were set aggressively to force generalization. The configuration followed strict structural rules:
+\subsection*{Structural Configuration \& Hyperparameter Constraints}
+
+While standard hyperparameter tuning was conducted via Optuna, algorithms cannot simply be deployed "out-of-the-box" on physical grid data. Search spaces were deliberately constrained: learning rates were sampled logarithmically, tree depths were limited to prevent overfitting, and dropout rates in neural networks were set aggressively to force generalization. Furthermore, the configurations were subjected to the following strict structural interventions:
+
 \begin{itemize}
     \item \textbf{The Prophet Baseline \& Operational Weather Dependency:} Facebook’s Prophet operates fundamentally as a Generalized Additive Model (GAM) evaluated via Stan. Because it is not an autoregressive machine learning model, feeding it historical autoregressive lags (e.g., $y_{t-24}$) fundamentally breaks its mathematical formulation. Furthermore, to avoid an operational weather dependency—where predicting tomorrow's load would strictly require a perfect exogenous weather forecast—Prophet's feature space was constrained exclusively to mathematically deterministic calendar variables.
     \item \textbf{Physical Pooling Kernels (N-HiTS):} By default, sequence models often apply arbitrary geometric pooling progressions. To resolve this, N-HiTS was forced to utilize physically-aware pooling kernels. For the 168-hour lookback window, kernels were strictly locked to evaluate daily, quarter-day, and hourly frequencies ($24$, $6$, $1$).
@@ -254,7 +264,7 @@ Rolling Mean (\texttt{24h}) & Dec 31st, 14:00 to Jan 1st, 14:00 & Strictly Causa
 
 \subsection*{The "Auto-Regression Trap" \& The Rolling Origin Framework}
 
-Through rigorous code diagnostics and automated algorithmic debugging, a severe evaluation flaw was identified during the initial deep learning validation. When sequence models were asked to iteratively predict the entire 6-month validation set without true historical updates, the algorithm was forced to recursively feed on its own predictions. This compounded mathematical hallucinations, artificially inflating the MAE beyond 2,100 MW. To prevent this and ensure a rigorous comparison, the evaluation methodology was strictly standardized based on market realities:
+During the initial deep learning validation, an evaluation flaw was identified. When sequence models were asked to iteratively predict the entire 6-month validation set without historical updates, the algorithm was forced to recursively feed on its own predictions. This compounded forecasting errors, artificially inflating the MAE beyond 2,100 MW. To prevent this and ensure a fair comparison, the evaluation methodology was standardized based on market realities:
 
 \textbf{1. The Sliding Window with Frozen Weights (Autoregressive Models):} For models reliant on past signal history (LightGBM, TabNet, MLP, N-HiTS, TFT), a strict \textit{Day-Ahead Rolling Origin} was enforced. The model weights were permanently frozen at the end of 2017 to prove their generalization capability without the crutch of continuous retraining. However, during validation, their context windows slid forward every 24 hours to ingest true recent grid conditions (the $t-24$ lags), naturally evading the Auto-Regression Trap. Crucially, the evaluation stride was strictly locked to match the forecasting horizon ($stride = 24, horizon = 24$). This guarantees strict operational fidelity to the European Day-Ahead market (OMIE), where operators submit 24-hour blocks once daily. Furthermore, it mathematically prevents ``overlap bias.'' A smaller stride (e.g., $stride=1$) would generate 24 conflicting predictions for a single target hour, distorting the MAE metric and violating the realistic constraints of day-ahead dispatch. 
 
@@ -298,9 +308,12 @@ A profound insight emerges from the day-ahead leaderboard (see Table \ref{tab:le
 \subsection*{The "Stale Noise" Vulnerability (Sandbox A Failure)}
 Furthermore, the severe degradation of the \textbf{Sandbox A (Causal Forecasts)} paradigm—yielding a 2,780.3 MW error that collapsed below even the Naïve Repetitive Floor—highlights the danger of integrating volatile covariates. While augmenting the feature space with yesterday's physical grid data ($t-24$ generation and prices) logically appears advantageous, it injects massive operational noise. Electricity generation dispatch is driven by dynamic spot market economics and intermittent weather patterns that do not strictly repeat every 24 hours. The tree-based algorithm greedily anchored onto these highly-correlated but stale generation features, completely overriding the stable underlying calendar cycles and forcing a catastrophic generalization failure.
 
+\vspace{0.2cm}
+\noindent \textbf{The Denominator Effect (The MAE vs. MAPE Confusion):} 
+A notorious mathematical artifact appears at the bottom of Table \ref{tab:leaderboard}: while LightGBM Sandbox A produced a \textit{worse} absolute physical error than the Seasonal Naïve floor (2,780.3 MW vs 2,688.4 MW), it registered a \textit{better} relative percentage error (9.02\% vs 9.21\%). This paradox is dictated by when the models make their mistakes. The Naïve model fails catastrophically during low-demand anomalies like holidays; dividing by this small actual load severely inflates the MAPE. Conversely, Sandbox A's "stale noise" caused its largest misses during peak daytime hours. The massive denominator of peak grid load mathematically diluted the percentage penalty, masking the severity of its physical Megawatt failure.
+
 \subsection*{The Additive Summation Phenomenon}
 During the engineering of the Sandbox B paradigm, an interesting phenomenon emerged: when granted $t=0$ generation data, a simplistic Linear Regression drastically minimized the performance gap against heavily tuned tree-based models on the same leaked data. This is dictated by the physical laws of the grid, where $Load \approx \sum Generation$. Linear regression natively solves this pure additive equation perfectly. Conversely, tree-based models struggle to map pure additive mathematical equations ($A + B = C$), requiring significantly more depth to approximate what Linear Regression solves natively.
-
 
 \section{Beyond Day-Ahead: Operational Flexibility and MLOps}
 
@@ -317,16 +330,16 @@ At the $h=1$ intraday horizon, the architectural hierarchy completely flipped. \
 \subsection*{Shattering the Ceiling (Continuous MLOps)}
 Applying this continuous learning philosophy to the Intraday horizon, the pipeline was explicitly re-engineered to dynamically refit the LightGBM algorithm, simulating an automated daily update. 
 
-\begin{figure}[htbp]
+\begin{figure}[H]
     \centering
     \includegraphics[width=1\textwidth]{results_bar_chart.png} 
     \caption{Global Architectural Evaluation. This final staircase illustrates the massive evolutionary leaps across the Validation Set. The intraday LightGBM architecture (green) successfully breaches the superhuman zone, defeating the TSO validation benchmark (red).}
     \label{fig:results_bar}
 \end{figure}
 
-The results were unprecedented. As illustrated in Figure \ref{fig:results_bar}, the high-frequency Intraday LightGBM model successfully breached the superhuman zone during validation. To definitively prove this was not an anomaly, the MLOps architecture was deployed on the completely unseen, locked 6-month operational \textbf{Test Set}.
+As illustrated in Figure \ref{fig:results_bar}, the high-frequency Intraday LightGBM model successfully breached the TSO benchmark during validation. To verify this performance, the MLOps architecture was deployed on the unseen, locked 6-month operational \textbf{Test Set}. 
 
-During this strict out-of-sample Test phase, the official TSO forecast operated at an inherently higher accuracy than it did during validation, achieving a formidable 258.6 MW (0.89\% MAPE) ceiling. By leveraging continuous learning and high-frequency data ingestion, the automated Intraday LightGBM pipeline achieved a final test-set MAE of \textbf{251.9 MW (0.88\% MAPE)}. This officially shattered the final operational ceiling, definitively proving that high-frequency algorithmic execution can defeat traditional human-in-the-loop grid operator forecasts.
+During this out-of-sample phase, the official TSO forecast operated at an inherently higher accuracy than it did during validation, establishing a formidable 258.6 MW (0.89\% MAPE) ceiling. By leveraging continuous learning and high-frequency data ingestion, the automated Intraday LightGBM pipeline achieved a final test-set MAE of \textbf{251.9 MW (0.88\% MAPE)}. This effectively surpasses the operational ceiling, proving that high-frequency algorithmic execution can rival and defeat traditional human-in-the-loop grid operator forecasts.
 
 \section{Error Analysis \& Business Interpretation}
 
@@ -346,11 +359,11 @@ While the day-ahead operational models stalled against the \textbf{0.97\% TSO Ce
 \begin{itemize}
     \item \textbf{The 74.4\% Win Rate (Algorithmic Objectivity):} In a direct hour-by-hour evaluation across the 6-month test set, the LightGBM Intraday model achieved a lower absolute error than the TSO in 74.4\% of all forecasted hours (3,288 out of 4,417 hours). This demonstrates that while the TSO maintains a marginal aggregate advantage by perfectly predicting flat baseload periods, the algorithm serves as a vastly superior real-time compass during the majority of the day.
     
-    \item \textbf{Holiday Robustness \& Human Bias:} Intuitively, human operators should excel at anticipating behavioral shocks like holidays. However, during official holidays and \textit{puente} bridge days, TSO forecasts frequently collapse, with average errors exploding to \textbf{562.1 MW}. This indicates a human bias toward over-relying on rigid historical templates (e.g., artificially pasting the exact load curve from last Christmas). Conversely, the automated model organically blends the \texttt{is\_holiday} flag with actual real-time thermodynamic temperatures, reducing the holiday error down to \textbf{332.6 MW}—a 40\% reduction in predictive failure during the grid's most vulnerable periods.
+    \item \textbf{Holiday Robustness \& Human Bias:} Intuitively, human operators should excel at anticipating behavioral shocks like holidays. However, during official holidays and \textit{puente} bridge days, TSO forecast performance frequently degrades, with average errors increasing to \textbf{562.1 MW}. This indicates a potential reliance on rigid historical templates (e.g., repeating the load curve from the previous year). Conversely, the automated model organically blends the \texttt{is\_holiday} flag with real-time thermodynamic temperatures, reducing the holiday error to \textbf{332.6 MW}—a 40\% reduction in predictive error during the grid's most volatile periods.
 
-    \begin{figure}[htbp]
+    \begin{figure}[H]
         \centering
-        \includegraphics[width=0.95\textwidth]{holiday_stress_test.png} 
+        \includegraphics[width=0.6\textwidth]{holiday_stress_test.png} 
         \caption{Stress-Testing the Model (Dec 24 - Dec 27). During the highly volatile Christmas holiday window, the official TSO absolute error (purple bars) experiences catastrophic spikes. Conversely, the high-frequency LightGBM median forecast (red line) successfully tracks the actual grid load (black line), safely encapsulating reality within its 90\% quantile regression confidence interval (blue band).}
         \label{fig:holiday_stress_test}
     \end{figure}
